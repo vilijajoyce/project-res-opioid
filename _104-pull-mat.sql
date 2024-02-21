@@ -1,9 +1,9 @@
 /*----------------------------------------------------------------------------------------------------
- Program: 		_104-pull-mat-20221006.sql
+ Program: 		_104-pull-mat.sql
  Title: 		OPIOID-CIPHER: Pull MAT-related (methadone, buprenorphine, naltrexone) records
 				from VA and CC files
  Author: 		Vilija Joyce (vilija.joyce@va.gov)
- Last modified: 20221006
+ Last modified: 20240221
 ----------------------------------------------------------------------------------------------------*/
 /*Select database*/
 USE --ORD_XXXX_XXXXXXXXXX; --***Edit***
@@ -245,6 +245,7 @@ GROUP BY sta3n, LocalDrugSID, LocalDrugNameWithDose, NationalDrugSID, DrugNameWi
 	 - VUIDs (buprenorphine and naltrexone only)
 		- RxOut.RxOutpatFill
 	 - LocalDrugSIDs created from NDC, DrugNameWithDose + sta3n, and VUID tables (for BCMA pull)
+		- BCMA.MedicationLog
 		- BCMA.BCMADispensedDrug
 ----------------------------------------------------------------------------------------------------*/
 /*HCPCS*/
@@ -627,6 +628,54 @@ FROM #_104_met_bup_nal_va_inp
 --20221006 scrssn			n=
 --		   NationalDrugSID 	n=
 
+--VA (BCMA Dispensed Drug)
+DROP TABLE IF EXISTS #_104_met_bup_nal_va_inp2;
+SELECT 
+	DISTINCT
+	COH.scrssn
+	,COH.PatientSID
+	,COH.sta3n	
+	,BCMA.ActionDateTime AS DateTimeRX
+	,LIST.NationalDrugSID
+	,LIST.DrugNameWithDose
+	,LIST.DrugNameWithoutDose
+	,LIST.VUID	
+	,LIST.ind_met_drugnamesta3n AS ind_met_drugnamesta3n_va_inp
+	,LIST.ind_bup_ndc AS ind_bup_ndc_va_inp
+	,LIST.ind_bup_vuid AS ind_bup_vuid_va_inp
+	,LIST.ind_nal_ndc AS ind_nal_ndc_va_inp
+	,LIST.ind_nal_vuid AS ind_nal_vuid_va_inp
+	,BCMA.DosesOrdered
+	,BCMA.DosesGiven
+	,BCMA.UnitOfAdministration
+	,'BCMA.BCMADispensedDrug' AS source
+INTO #_104_met_bup_nal_va_inp2 
+FROM DFLT.XXXXXX AS COH --***Edit***
+INNER JOIN Src.BCMA_BCMADispensedDrug AS BCMA 
+	ON BCMA.PatientSID = COH.PatientSID AND BCMA.Sta3n = COH.sta3n
+INNER JOIN CDWWork.Dim.LocalDrug AS DIM1
+	ON BCMA.LocalDrugSID=DIM1.LocalDrugSID and BCMA.Sta3n=DIM1.Sta3n
+INNER JOIN #mat_locdrugsid_met_bup_nal2 AS LIST
+	ON LIST.LocalDrugSID = DIM1.LocalDrugSID AND LIST.sta3n=DIM1.sta3n 
+WHERE 
+	(
+	BCMA.CohortName='Primary' --***Edit***
+	AND (BCMA.ActionDateTime >= CONVERT(datetime2(0),DATEADD(dd,0,COH.cohstart))
+	AND BCMA.ActionDateTime < CONVERT(datetime2(0),DATEADD(dd,365,COH.cohstart)))
+	)
+
+-- Ck
+--SELECT * FROM #_104_met_bup_nal_va_inp2 ORDER BY scrssn, DateTimeRX
+
+-- Ck
+SELECT 
+	COUNT(DISTINCT scrssn) AS patient_count
+	,COUNT(NationalDrugSID) AS natdrugsidcode_count
+FROM #_104_met_bup_nal_va_inp2
+
+--20240221 scrssn			n=
+--		   NationalDrugSID 	n=
+	
 /*Stop code 523 - Opioid Treatment Program (OTP) in either primary or secondary position*/
 /*Assume methadone*/
 --VA
@@ -856,6 +905,31 @@ SELECT *
 			FROM #_104_met_bup_nal_va_inp 	
 		UNION
 		SELECT 	scrssn, 
+				cast(DateTimeRX AS date) date1, 
+				NULL AS date2,
+				'0' AS ind_met_hcpcs_va, 
+				'0' AS ind_bup_hcpcs_va,
+				'0' AS ind_nal_hcpcs_va,
+				'0' AS ind_met_hcpcs_fee,
+				'0' AS ind_bup_hcpcs_fee,
+				'0' AS ind_nal_hcpcs_fee,
+				'0' AS ind_met_hcpcs_pit,
+				'0' AS ind_bup_hcpcs_pit,
+				'0' AS ind_nal_hcpcs_pit,
+				'0' AS ind_bup_ndc_va_out,
+				'0' AS ind_nal_ndc_va_out,	
+				'0' AS ind_met_drugnamesta3n_va_out,
+				'0' AS ind_bup_vuid_va_out,
+				'0' AS ind_nal_vuid_va_out,
+				ind_met_drugnamesta3n_va_inp,
+				ind_bup_ndc_va_inp,
+				ind_bup_vuid_va_inp,
+				ind_nal_ndc_va_inp,
+				ind_nal_vuid_va_inp,				
+				'0' AS ind_met_stop_va					
+			FROM #_104_met_bup_nal_va_inp2			
+		UNION	
+		SELECT 	scrssn, 
 				cast(VisitDateTime AS date) date1, 
 				NULL AS date2,
 				'0' AS ind_met_hcpcs_va, 
@@ -884,7 +958,7 @@ SELECT *
 
 --CK
 --SELECT * FROM #_104_primary ORDER BY scrssn, date1 
---20221006 n=
+--20240221 n=
 
 --Note: Dupes by scrssn and date1. Records may have more than 1 end date and more than 1 source (e.g. Fee and PIT)
 
